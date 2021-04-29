@@ -20,14 +20,13 @@ knitr::opts_knit$set(root.dir = project_folder)
 ```
 
 ```{r}
-library(dplyr, warn.conflicts=FALSE)
-library(DBI)
-library(stringr)
-library(tibble)
-library(lubridate)
-library(ggplot2)
-library(geosphere)
-library(modeest)
+packages <- c("dplyr", "DBI", "skimr", "stringr", "tibble", "lubridate", "geosphere", "ggplot2", "ggmap", "ggthemes", "gridExtra", "gganimate", "modeest")
+
+install.packages(setdiff(packages, rownames(installed.packages())))
+
+for (pkg in packages) {
+  library(pkg, character.only = TRUE, warn.conflicts = FALSE, quietly = TRUE)
+}
 ```
 
 ```{r}
@@ -50,8 +49,6 @@ for (url_link in full_url) {
 ```
 
 ```{r}
-setwd(project_folder)
-
 connect <- dbConnect(RSQLite::SQLite(), "local_sqldb.sqlite", extended_type=TRUE)
 
 field_names <-  c("ride_id" = "TEXT",
@@ -71,12 +68,16 @@ field_names <-  c("ride_id" = "TEXT",
 if (!dbExistsTable(connect, "bikeshare")) {
   dbCreateTable(connect, "bikeshare", field_names)
 }
+
+dbDisconnect(connect)
 ```
 
 ```{r}
+connect <- dbConnect(RSQLite::SQLite(), "local_sqldb.sqlite", extended_type=TRUE)
+
 query <- dbSendQuery(connect, 'select * from bikeshare')
 
-if (!dbGetRowCount(query)) {
+if (nrow(dbFetch(query, n = 10)) == 0) {
   for (i in seq(full_url)) {
     temp <- tempfile()
     url_link <- full_url[i]
@@ -87,72 +88,90 @@ if (!dbGetRowCount(query)) {
     unlink(temp)
   }
 }
+
+dbClearResult(query)
+dbDisconnect(connect)
 ```
 
 ```{r}
+connect <- dbConnect(RSQLite::SQLite(), "local_sqldb.sqlite", extended_type=TRUE)
+
 bikeshare_df <- dbReadTable(connect, "bikeshare")
 head(bikeshare_df)
+
+dbDisconnect(connect)
 ```
 
 ```{r}
-str(bikeshare_df)
+skim(bikeshare_df)
 ```
 
 ```{r}
-bikeshare_df %>%
-  select(everything()) %>%
-  summarize_all(funs(sum(is.na(.))))
-```
-
-```{r}
-bikeshare_df %>%
-  filter(is.na(start_station_id))
+print(paste("There are", nrow(bikeshare_df[!complete.cases(bikeshare_df),]), "rows with missing values, excluding empty fields.", sep = " "))
 ```
 
 ```{r}
 bikeshare_df %>%
-  filter(start_station_name == '')
+  filter(is.na(start_station_id)) %>% 
+  head()
 ```
 
 ```{r}
 bikeshare_df %>%
-  filter(start_station_name == '' & ymd_hms(started_at) < "2020-07-01" )
+  filter(start_station_name == '') %>% 
+  arrange(started_at) %>% 
+  head()
 ```
 
 ```{r}
 bikeshare_df %>%
-  filter(start_station_name == '' & ymd_hms(started_at) > "2021-03-30" )
+  filter(start_station_name == '') %>% 
+  arrange(desc(started_at)) %>% 
+  head()
 ```
 
 ```{r}
 bikeshare_df %>%
-  filter(start_station_name == '' & !is.na(start_station_id))
+  filter(start_station_name == '' & !is.na(start_station_id)) %>% 
+  arrange(started_at) %>% 
+  head()
 ```
 
 ```{r}
 bikeshare_df %>%
-  filter(start_station_name == '' & !is.na(start_station_id) & ymd_hms(started_at) < "2020-12-01" )
+  filter(start_station_name == '' & !is.na(start_station_id)) %>% 
+  arrange(desc(started_at)) %>% 
+  head()
+```
+
+```{r}
+bikeshare_df %>%
+  filter(start_station_name != '' & start_station_id == 0) %>% 
+  summarize(name_count = n_distinct(start_station_name)) 
+```
+
+```{r}
+bikeshare_df %>%
+  filter(start_station_name == '' & !is.na(start_station_id) & start_station_id != 0) %>% 
+  head()
+```
+
+```{r}
+bikeshare_df %>%
+  filter(end_station_name == '' & !is.na(end_station_id) & end_station_id != 0) %>% 
+  head()
+```
+
+```{r}
+bikeshare_df %>%
+  filter(start_station_name == '' & rideable_type != 'electric_bike') %>% 
+  head()
 ```
 
 ```{r}
 bikeshare_df %>% 
-  filter(start_station_name == '' & !is.na(start_station_id) & ymd_hms(started_at) > "2021-03-30" )
-```
-
-```{r}
-bikeshare_df %>% 
-  filter(start_station_name == '' & !is.na(start_station_id) &
-                         end_station_name != '' & end_station_id == 0)
-```
-
-```{r}
-bikeshare_df %>%
-  filter(start_station_name == '' & rideable_type != 'electric_bike')
-```
-
-```{r}
-bikeshare_df %>% 
-  filter(end_station_name == '' & rideable_type != 'electric_bike')
+  filter(end_station_name == '' & rideable_type != 'electric_bike') %>% 
+  head()
 ```
 
 ```{r}
@@ -193,29 +212,13 @@ bikeshare_df %>%
 
 ```{r}
 bikeshare_df %>% 
-  filter(start_station_name == end_station_name & start_station_id != 0)
+  filter(start_station_name == end_station_name & start_station_id != 0) %>% 
+  head()
 ```
 
 ```{r}
-rush_hour_check <- function(day, given_time) {
-  if (day %in% c("Saturday", "Sunday")) {
-    return("normal")
-  } 
-  given_time <- parse_date_time(given_time, orders=c("Ymd HMS"))  %>% format("%H:%M:%S")
-  
-  times <- parse_date_time(c("07:00", "10:00", "16:00", "19:00"), orders=c("HM"))  %>% format("%H:%M:%S")
-  
-  if (times[1] <= given_time & given_time <= times[2]) {
-    return("morning rush hour")
-  } else if (times[3] <= given_time & given_time <= times[4]) {
-    return("evening rush hour")
-  } else {
-    return("normal")
-  }
-}
-
-bikeshare_df <- mutate(bikeshare_df, day_of_week=weekdays(as.Date(started_at)))
-bikeshare_df$traffic_condition <- mapply(rush_hour_check, bikeshare_df$day_of_week, bikeshare_df$started_at)
+bikeshare_df <- bikeshare_df %>% 
+  mutate(month_of_year = format(as.Date(started_at), "%m"), day_of_week = weekdays(as.Date(started_at)), hour_of_day = hour(as_datetime(started_at)), quarter_of_year = quarter(as.Date(started_at), with_year = TRUE))
 
 head(bikeshare_df)
 ```
@@ -232,9 +235,10 @@ head(bikeshare_df)
 
 ```{r}
 ggplot(bikeshare_df  %>% filter(start_station_name == end_station_name & start_station_id != 0), aes(x = trip_duration)) + geom_histogram(binwidth = 1) +
+  scale_y_continuous(trans='log2') +
   xlab("Duration (minutes)") +
-  ylab("Count of trips") +
-  ggtitle("Count of Trips Starting and Ending at the Same Location")
+  ylab("Logarithmic Number of Trips") +
+  ggtitle("Logarithmic Count of Trips Starting and Ending at the Same Location")
 ```
 
 ```{r}
@@ -252,18 +256,13 @@ bikeshare_df %>% arrange(desc(trip_duration))
 
 ```{r}
 bikeshare_df <- bikeshare_df %>% 
-  filter(trip_duration <= period(c(0, 0, 12), c('second', 'minute', 'hour')))
-```
-
-```{r}
-bikeshare_df <- bikeshare_df %>% 
   filter(start_station_name != end_station_name | (start_station_name == end_station_name & trip_duration > period(c(0, 5), c('second', 'minute'))))
 ```
 
 ```{r}
 ggplot(bikeshare_df, aes(x = rideable_type, fill = member_casual)) +
   geom_histogram(stat="count") +
-  stat_count(aes(y=..count.., label=..count..), geom="text", vjust=1.2, size=3) +
+  stat_count(aes(y=..count.., label=..count..), geom="text", vjust=1.2, size=3, alpha = .7) +
   xlab("") +
   ylab("Total number of trips") +
   guides(fill=guide_legend(title="Rider Type")) + 
@@ -280,15 +279,15 @@ daily_trip_df$day_of_week <- factor(daily_trip_df$day_of_week, levels = weekdays
 
 ggplot(daily_trip_df, aes(x = day_of_week, y = daily_trip_count)) + 
   geom_violin(color = 'navy') +
-  geom_dotplot(binaxis = 'y', stackdir = 'center', dotsize = .4) +
+  geom_dotplot(binaxis = 'y', stackdir = 'center', dotsize = .4, color = "grey", alpha = .7) +
   xlab("") +
   ylab("Total Number of Daily Trips") +
-  theme(panel.grid.minor.x=element_blank(), panel.grid.major.x=element_blank())
+  theme(panel.grid.minor.x = element_blank(), panel.grid.major.x = element_blank())
 ```
 
 ```{r}
 daily_trip_df <- bikeshare_df %>%
-  filter(member_casual == 'member') %>% 
+  filter(member_casual == 'member') %>%
   select(started_at, day_of_week) %>%
   group_by(as.Date(started_at)) %>%
   summarize(daily_trip_count = length(started_at), day_of_week = first(day_of_week))
@@ -296,16 +295,16 @@ daily_trip_df <- bikeshare_df %>%
 daily_trip_df$day_of_week <- factor(daily_trip_df$day_of_week, levels = weekdays(x=as.Date(seq(7), origin='1950-01-01')))
 
 ggplot(daily_trip_df, aes(x = day_of_week, y = daily_trip_count)) + 
-  geom_violin(color = 'navy', fill = 'turquoise') +
-  geom_dotplot(binaxis = 'y', stackdir = 'center', dotsize = .4) +
+  geom_violin(color = 'navy', fill = 'turquoise', alpha = .9) +
+  geom_dotplot(binaxis = 'y', stackdir = 'center', dotsize = .4, color = "grey", alpha = .7) +
   xlab("") +
   ylab("Total Number of Daily Trips") +
-  theme(panel.grid.minor.x=element_blank(), panel.grid.major.x=element_blank())
+  theme(panel.grid.minor.x = element_blank(), panel.grid.major.x = element_blank())
 ```
 
 ```{r}
 daily_trip_df <- bikeshare_df %>%
-  filter(member_casual == 'casual') %>% 
+  filter(member_casual == 'casual') %>%
   select(started_at, day_of_week) %>%
   group_by(as.Date(started_at)) %>%
   summarize(daily_trip_count = length(started_at), day_of_week = first(day_of_week))
@@ -313,11 +312,11 @@ daily_trip_df <- bikeshare_df %>%
 daily_trip_df$day_of_week <- factor(daily_trip_df$day_of_week, levels = weekdays(x=as.Date(seq(7), origin='1950-01-01')))
 
 ggplot(daily_trip_df, aes(x = day_of_week, y = daily_trip_count)) + 
-  geom_violin(color = 'navy', fill = 'coral') +
-  geom_dotplot(binaxis = 'y', stackdir = 'center', dotsize = .4) +
+  geom_violin(color = 'navy', fill = 'coral', alpha = .9) +
+  geom_dotplot(binaxis = 'y', stackdir = 'center', dotsize = .4, color = "grey", alpha = .7) +
   xlab("") +
   ylab("Total Number of Daily Trips") +
-  theme(panel.grid.minor.x=element_blank(), panel.grid.major.x=element_blank())
+  theme(panel.grid.minor.x = element_blank(), panel.grid.major.x = element_blank())
 ```
 
 ```{r}
@@ -329,7 +328,7 @@ hourly_trip_df <- bikeshare_df %>%
 hourly_trip_df$hour <- paste(hourly_trip_df$hour, ":00", sep = "")
 
 ggplot(hourly_trip_df, aes(y = hour, x = daily_trip_count)) + 
-  geom_boxplot(color = "navy") +
+  geom_boxplot(color = "navy", alpha = .7) +
   scale_y_discrete(limits=rev) +
   xlab("Total Number of Daily Trips") +
   ylab("Hour of Day") +
@@ -346,7 +345,7 @@ hourly_trip_df <- bikeshare_df %>%
 hourly_trip_df$hour <- paste(hourly_trip_df$hour, ":00", sep = "")
 
 ggplot(hourly_trip_df, aes(y = hour, x = daily_trip_count)) + 
-  geom_boxplot(color = "navy", fill = "turquoise") +
+  geom_boxplot(color = "navy", alpha = .9, fill = "turquoise") +
   scale_y_discrete(limits=rev) +
   xlab("Total Number of Daily Trips") +
   ylab("Hour of Day") +
@@ -363,7 +362,7 @@ hourly_trip_df <- bikeshare_df %>%
 hourly_trip_df$hour <- paste(hourly_trip_df$hour, ":00", sep = "")
 
 ggplot(hourly_trip_df, aes(y = hour, x = daily_trip_count)) + 
-  geom_boxplot(color = "navy", fill = "coral") +
+  geom_boxplot(color = "navy", alpha = .9, fill = "coral") +
   scale_y_discrete(limits=rev) +
   xlab("Total Number of Daily Trips") +
   ylab("Hour of Day") +
@@ -371,11 +370,18 @@ ggplot(hourly_trip_df, aes(y = hour, x = daily_trip_count)) +
 ```
 
 ```{r}
-ggplot(bikeshare_df, aes(x = as.numeric(as.duration(trip_duration), "minutes"), fill = member_casual)) +
+modified_bikeshare_df <- bikeshare_df %>% 
+  filter(trip_duration <= period(c(0, 0, 12), c('second', 'minute', 'hour')))
+```
+
+
+```{r}
+ggplot(modified_bikeshare_df, aes(x = as.numeric(as.duration(trip_duration), "minutes"), fill = member_casual)) +
   geom_histogram(binwidth = 10) +
+  scale_y_continuous(trans='log2') +
   facet_wrap(~ member_casual) +
   xlab("Duration of Trip (minutes)") +
-  ylab("Total number of trips") +
+  ylab("Logarithmic Number of Trips") +
   guides(fill=guide_legend(title="Rider Type")) + 
   theme(panel.grid.minor.x=element_blank(), panel.grid.major.x=element_blank())
 ```
@@ -387,19 +393,105 @@ start_station_df <- bikeshare_df %>%
   group_by(member_casual, start_station_name) %>%
   summarize(trip_count = length(start_station_name), start_lat = mlv(start_lat, method = "mfv"), start_lng = mlv(start_lng, method = "mfv")) %>% 
   arrange(desc(trip_count)) %>% 
-  distinct(member_casual, start_station_name, .keep_all = TRUE)
+  distinct(member_casual, start_station_name, .keep_all = TRUE) %>%
+  ungroup
 
 start_station_df
 ```
 
 ```{r}
-# basemap <- ggmap(get_googlemap(center = c(lon = -87.62408, lat = 41.88103),
-#                     zoom = 11, scale = 2,
-#                     maptype ='terrain',
-#                     color = 'color'))
+basemap <- ggmap(get_stamenmap(c(left = min(start_station_df$start_lng) - .05,
+                  bottom = min(start_station_df$start_lat) - .01,
+                  right = max(start_station_df$start_lng) + .05,
+                  top = max(start_station_df$start_lat)) + .01,
+                  maptype = "toner-lite", zoom = 11))
 
 basemap + 
-  geom_point(aes(x = start_lng, y = start_lat), data = start_station_df, size = 0.5) + 
-  theme(legend.position="bottom")
+  geom_point(aes(x = start_lng, y = start_lat), data = start_station_df, color = "navy", size = 0.5)
+```
+
+```{r}
+top_member_start_station_df <- start_station_df %>% 
+  filter(member_casual == "member") %>%
+  slice_max(trip_count, n = 10)
+
+top_casual_start_station_df <- start_station_df %>% 
+  filter(member_casual == "casual") %>%
+  slice_max(trip_count, n = 10)
+
+basemap + 
+  geom_point(aes(x = start_lng, y = start_lat, size = trip_count), data = top_member_start_station_df, color = "turquoise", alpha = .7) + 
+  geom_point(aes(x = start_lng, y = start_lat, size = trip_count), data = top_casual_start_station_df, color = "coral", alpha = .7) +
+  facet_wrap(~ member_casual)
+```
+
+```{r}
+end_station_df <- bikeshare_df %>% 
+  filter(end_station_name != "") %>% 
+  group_by(member_casual, end_station_name) %>%
+  summarize(trip_count = length(end_station_name), end_lat = mlv(end_lat, method = "mfv"), end_lng = mlv(end_lng, method = "mfv")[1]) %>% 
+  arrange(desc(trip_count)) %>% 
+  distinct(member_casual, end_station_name, .keep_all = TRUE) %>%
+  ungroup
+
+end_station_df
+```
+
+```{r}
+top_member_end_station_df <- end_station_df %>% 
+  filter(member_casual == "member") %>%
+  slice_max(trip_count, n = 10)
+
+top_casual_end_station_df <- end_station_df %>% 
+  filter(member_casual == "casual") %>%
+  slice_max(trip_count, n = 10)
+
+basemap + 
+  geom_point(aes(x = end_lng, y = end_lat, size = trip_count), data = top_member_end_station_df, color = "turquoise", alpha = .7) + 
+  geom_point(aes(x = end_lng, y = end_lat, size = trip_count), data = top_casual_end_station_df, color = "coral", alpha = .7) +
+  facet_wrap(~ member_casual)
+```
+
+```{r}
+route_df <- bikeshare_df %>%
+  filter(start_station_name != "" & end_station_name != "" & start_station_name != end_station_name) %>% 
+  with_groups(start_station_name, mutate, std_start_lat = mlv(start_lat, method = "mfv")[1], std_start_lng = mlv(start_lng, method = "mfv")[1]) %>% 
+  with_groups(end_station_name, mutate, std_end_lat = mlv(end_lat, method = "mfv")[1], std_end_lng = mlv(end_lng, method = "mfv")[1]) %>% 
+  group_by(started_hour = paste(substr(started_at, 12, 13), ":00:00", sep = ""), member_casual, std_start_lat, std_start_lng, std_end_lat, std_end_lng) %>% 
+  summarize(route_count = length(std_end_lng)) %>% 
+  ungroup %>% 
+  arrange(desc(route_count)) %>% 
+  group_by(started_hour, member_casual) %>% 
+  slice(1:10) %>% 
+  ungroup
+
+route_df
+```
+
+```{r}
+basemap <- ggmap(get_stamenmap(
+                c(left = min(route_df$std_start_lng, route_df$std_end_lng) - .05,
+                  bottom = min(route_df$std_start_lat, route_df$std_end_lat) - .01,
+                  right = max(route_df$std_start_lng, route_df$std_end_lng) + .05,
+                  top = max(route_df$std_start_lat, route_df$std_end_lat)) + .01,
+                  maptype = "toner-lite", zoom = 11))
+
+ route_time_lapse = basemap +
+ geom_curve(data = route_df,
+ aes(x = std_start_lng, y = std_start_lat, xend = std_end_lng, yend = std_end_lat, color = member_casual, group = started_hour),    
+ arrow = arrow(angle = 15, length = unit(0.3, "cm"), type = "closed"),
+ alpha = 0.8, curvature = 0.25, inherit.aes = TRUE) +
+ scale_size_continuous(range = c(1, 30)) +
+ coord_cartesian() +
+ labs(title = "Most Frequent Bike Routes", subtitle = "Hourly Time Lapse: {closest_state}") +
+ guides(fill = guide_legend(title = "Rider Type")) +
+ transition_states(started_hour, transition_length = 2, state_length = 2) +
+  enter_fade() + 
+  exit_shrink() +
+  ease_aes('sine-in-out')
+
+animate(route_time_lapse, duration = 25)
+
+anim_save("route_time_lapse.gif")
 ```
 
