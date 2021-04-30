@@ -20,7 +20,7 @@ knitr::opts_knit$set(root.dir = project_folder)
 ```
 
 ```{r}
-packages <- c("dplyr", "DBI", "skimr", "stringr", "tibble", "lubridate", "geosphere", "ggplot2", "ggmap", "ggthemes", "gridExtra", "gganimate", "modeest")
+packages <- c("dplyr", "DBI", "skimr", "stringr", "tidyr", "tibble", "lubridate", "geosphere", "ggplot2", "ggmap", "ggthemes", "gridExtra", "gganimate", "ggalluvial", "modeest")
 
 install.packages(setdiff(packages, rownames(installed.packages())))
 
@@ -413,15 +413,23 @@ basemap +
 ```{r}
 top_member_start_station_df <- start_station_df %>% 
   filter(member_casual == "member") %>%
-  slice_max(trip_count, n = 10)
+  slice_max(trip_count, n = 50)
 
 top_casual_start_station_df <- start_station_df %>% 
   filter(member_casual == "casual") %>%
-  slice_max(trip_count, n = 10)
+  slice_max(trip_count, n = 50)
+
+basemap <- ggmap(get_stamenmap(c(left = min(top_member_start_station_df$start_lng) - .05,
+                  bottom = min(top_member_start_station_df$start_lat) - .01,
+                  right = max(top_member_start_station_df$start_lng) + .05,
+                  top = max(top_member_start_station_df$start_lat)) + .01,
+                  maptype = "toner-lite", zoom = 13))
 
 basemap + 
   geom_point(aes(x = start_lng, y = start_lat, size = trip_count), data = top_member_start_station_df, color = "turquoise", alpha = .7) + 
   geom_point(aes(x = start_lng, y = start_lat, size = trip_count), data = top_casual_start_station_df, color = "coral", alpha = .7) +
+  xlab("Longitude") +
+  ylab("Latitude") +
   facet_wrap(~ member_casual)
 ```
 
@@ -438,17 +446,25 @@ end_station_df
 ```
 
 ```{r}
-top_member_end_station_df <- end_station_df %>% 
+top_member_end_station_df <- end_station_df %>%
   filter(member_casual == "member") %>%
-  slice_max(trip_count, n = 10)
+  slice_max(trip_count, n = 50)
 
-top_casual_end_station_df <- end_station_df %>% 
+top_casual_end_station_df <- end_station_df %>%
   filter(member_casual == "casual") %>%
-  slice_max(trip_count, n = 10)
+  slice_max(trip_count, n = 50)
+
+basemap <- ggmap(get_stamenmap(c(left = min(top_member_end_station_df$end_lng) - .05,
+                  bottom = min(top_member_end_station_df$end_lat) - .01,
+                  right = max(top_member_end_station_df$end_lng) + .05,
+                  top = max(top_member_end_station_df$end_lat)) + .01,
+                  maptype = "toner-lite", zoom = 13))
 
 basemap + 
   geom_point(aes(x = end_lng, y = end_lat, size = trip_count), data = top_member_end_station_df, color = "turquoise", alpha = .7) + 
   geom_point(aes(x = end_lng, y = end_lat, size = trip_count), data = top_casual_end_station_df, color = "coral", alpha = .7) +
+  xlab("Longitude") +
+  ylab("Latitude") +
   facet_wrap(~ member_casual)
 ```
 
@@ -459,11 +475,10 @@ route_df <- bikeshare_df %>%
   with_groups(end_station_name, mutate, std_end_lat = mlv(end_lat, method = "mfv")[1], std_end_lng = mlv(end_lng, method = "mfv")[1]) %>% 
   group_by(started_hour = paste(substr(started_at, 12, 13), ":00:00", sep = ""), member_casual, std_start_lat, std_start_lng, std_end_lat, std_end_lng) %>% 
   summarize(route_count = length(std_end_lng)) %>% 
-  ungroup %>% 
-  arrange(desc(route_count)) %>% 
+  ungroup() %>% 
   group_by(started_hour, member_casual) %>% 
-  slice(1:10) %>% 
-  ungroup
+  slice_max(na.omit(route_count), n = 10) %>% 
+  ungroup()
 
 route_df
 ```
@@ -474,7 +489,7 @@ basemap <- ggmap(get_stamenmap(
                   bottom = min(route_df$std_start_lat, route_df$std_end_lat) - .01,
                   right = max(route_df$std_start_lng, route_df$std_end_lng) + .05,
                   top = max(route_df$std_start_lat, route_df$std_end_lat)) + .01,
-                  maptype = "toner-lite", zoom = 11))
+                  maptype = "toner-lite", zoom = 12))
 
  route_time_lapse = basemap +
  geom_curve(data = route_df,
@@ -490,8 +505,68 @@ basemap <- ggmap(get_stamenmap(
   exit_shrink() +
   ease_aes('sine-in-out')
 
-animate(route_time_lapse, duration = 25)
+animate(route_time_lapse, duration = 25, height = 800, width = 600)
 
 anim_save("route_time_lapse.gif")
 ```
+
+```{r}
+freq_routes_df <- bikeshare_df %>%
+  filter(start_station_name != "" & end_station_name != "" & start_station_name != end_station_name) %>% 
+  mutate(route_name = ifelse(start_station_name < end_station_name, paste(start_station_name, end_station_name, sep = " - "), paste(end_station_name, start_station_name, sep = " - "))) %>% 
+  group_by(member_casual, route_name) %>% 
+  summarize(subgroup_route_count = length(route_name)) %>% 
+  ungroup() %>% 
+  with_groups(route_name, mutate, route_count = sum(subgroup_route_count)) %>% 
+  slice_max(na.omit(route_count), n = 30) %>%  
+  mutate(axis1 = str_extract(route_name, "^[A-Za-z0-9& ]+(?= - )"), axis2 = str_extract(route_name, "(?<= - )[A-Za-z0-9& ]+$"))
+
+freq_routes_df
+```
+
+```{r}
+ggplot(freq_routes_df, aes(y = subgroup_route_count, axis1 = axis1, axis2 = axis2)) +
+  geom_alluvium(aes(fill = member_casual), width = 1/12) +
+  geom_stratum(width = 1/12, fill = "grey", color = "white") +
+  geom_label(stat = "stratum", aes(label = str_wrap(after_stat(stratum), 25)), size = 3, fill = "light grey") +
+  scale_fill_manual(values = c("coral", "turquoise")) +
+  ylab(" ") +
+  guides(fill=guide_legend(title="Rider Type")) + 
+  labs(title = "Most Frequent Bike Routes (Bidirectional)") +
+  theme(axis.text.x = element_blank(), axis.text.y = element_blank(), panel.grid.minor.x = element_blank(), panel.grid.major.x = element_blank(), panel.grid.minor.y = element_blank(), panel.grid.major.y = element_blank())
+```
+
+```{r}
+freq_routes_df <- bikeshare_df %>%
+  filter(start_station_name != "" & end_station_name != "" & start_station_name != end_station_name) %>%
+  mutate(route_name = ifelse(start_station_name < end_station_name, paste(start_station_name, end_station_name, sep = " - "), paste(end_station_name, start_station_name, sep = " - "))) %>%
+  with_groups(c(route_name, month_of_year), mutate, route_count = length(month_of_year)) %>%
+  group_by(month_of_year, route_name, member_casual) %>%
+  summarize(subgroup_route_count = length(month_of_year), route_count = first(route_count), .groups = "keep") %>%
+  ungroup() %>%
+  group_by(month_of_year) %>% 
+  slice_max(na.omit(route_count), n = 10) %>% 
+  ungroup() %>% 
+  mutate(axis1 = str_extract(route_name, "^[A-Za-z0-9&(). ]+(?= - )"), axis2 = str_extract(route_name, "(?<= - )[A-Za-z0-9&(). ]+$"))
+
+temp_df <- freq_routes_df %>% filter(subgroup_route_count == route_count)
+
+temp_df$subgroup_route_count <- 0L
+temp_df$member_casual <-rep("casual", n = 5)
+freq_routes_df <- bind_rows(freq_routes_df, temp_df) %>% arrange(month_of_year, route_name, member_casual)
+
+freq_routes_df
+```
+
+```{r}
+ggplot(freq_routes_df, aes(y = route_name, x = subgroup_route_count, fill = member_casual, group = member_casual)) +
+  geom_bar(position="dodge", stat="identity") + 
+  facet_grid(month_of_year ~ ., scales = "free", space = "free") +
+  xlab("Total Number of Trips (bidirectional)") +
+  ylab(" ") +
+  guides(fill=guide_legend(title="Rider Type")) + 
+  labs(title = "Most Frequent Monthly Bike Routes (Bidirectional)")
+```
+
+
 
