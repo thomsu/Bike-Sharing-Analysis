@@ -20,7 +20,7 @@ knitr::opts_knit$set(root.dir = project_folder)
 ```
 
 ```{r}
-packages <- c("dplyr", "DBI", "skimr", "stringr", "tidyr", "tibble", "lubridate", "geosphere", "ggplot2", "ggmap", "ggthemes", "gridExtra", "gganimate", "ggalluvial", "modeest")
+packages <- c("dplyr", "DBI", "skimr", "stringr", "tidyr", "tibble", "lubridate", "geosphere", "ggplot2", "ggmap", "ggthemes", "gridExtra", "gganimate", "modeest", "chorddiag", "htmlwidgets")
 
 install.packages(setdiff(packages, rownames(installed.packages())))
 
@@ -207,7 +207,7 @@ bikeshare_df %>%
   select(start_station_id, start_station_name) %>% 
   filter(start_station_name %in% search_result$start_station_name) %>%
   group_by(start_station_name, start_station_id) %>% 
-  summarize()
+  summarize(.groups = "drop")
 ```
 
 ```{r}
@@ -218,7 +218,10 @@ bikeshare_df %>%
 
 ```{r}
 bikeshare_df <- bikeshare_df %>% 
-  mutate(month_of_year = format(as.Date(started_at), "%m"), day_of_week = weekdays(as.Date(started_at)), hour_of_day = hour(as_datetime(started_at)), quarter_of_year = quarter(as.Date(started_at), with_year = TRUE))
+  mutate(month_of_year = as.factor(paste(format(as.Date(started_at), "%Y"), ".", format(as.Date(started_at), "%m"), sep = "")), 
+         day_of_week = weekdays(as.Date(started_at)), 
+         hour_of_day = as.factor(paste(str_pad(hour(as_datetime(started_at)), 2, "left", pad = 0), "00", sep = ":")), 
+         quarter_of_year = quarter(as.Date(started_at), with_year = TRUE))
 
 head(bikeshare_df)
 ```
@@ -234,7 +237,8 @@ head(bikeshare_df)
 ```
 
 ```{r}
-ggplot(bikeshare_df  %>% filter(start_station_name == end_station_name & start_station_id != 0), aes(x = trip_duration)) + geom_histogram(binwidth = 1) +
+ggplot(bikeshare_df  %>% filter(start_station_name == end_station_name & start_station_id != 0), aes(x = as.numeric(as.duration(trip_duration), "minutes"))) + geom_histogram(binwidth = 5) +
+  xlim(-180, 1600) +
   scale_y_continuous(trans='log2') +
   xlab("Duration (minutes)") +
   ylab("Logarithmic Number of Trips") +
@@ -261,12 +265,24 @@ bikeshare_df <- bikeshare_df %>%
 
 ```{r}
 ggplot(bikeshare_df, aes(x = rideable_type, fill = member_casual)) +
-  geom_histogram(stat="count") +
-  stat_count(aes(y=..count.., label=..count..), geom="text", vjust=1.2, size=3, alpha = .7) +
-  xlab("") +
+  geom_histogram(stat = "count", alpha = .8) +
+  stat_count(aes(y = ..count.., label = ..count..), geom = "text", vjust = 1.2, size =3, alpha = .8) +
+  xlab(" ") +
   ylab("Total number of trips") +
   guides(fill=guide_legend(title="Rider Type")) + 
-  theme(panel.grid.minor.x=element_blank(), panel.grid.major.x=element_blank())
+  theme(panel.grid.minor.x=element_blank(), panel.grid.major.x=element_blank()) +
+  ggtitle("Rider Usage by Type of Bike")
+```
+
+```{r}
+ggplot(bikeshare_df, aes(x = rideable_type, y = as.numeric(as.duration(trip_duration), "minutes"), fill = member_casual)) +
+  geom_bar(position = "dodge", stat = "summary", fun = "mean", alpha = .8) +
+  stat_summary(aes(label = round(..y.., 2)), fun = "mean", geom = "text", vjust = -0.5, position = position_dodge(0.9), size = 3, alpha = .8) +
+  xlab(" ") +
+  ylab("Average Duration of Trip (minutes)") +
+  guides(fill = guide_legend(title = "Rider Type")) + 
+  theme(panel.grid.minor.x = element_blank(), panel.grid.major.x = element_blank()) +
+  ggtitle("Average Trip Duration by Type of Bike")
 ```
 
 ```{r}
@@ -279,10 +295,11 @@ daily_trip_df$day_of_week <- factor(daily_trip_df$day_of_week, levels = weekdays
 
 ggplot(daily_trip_df, aes(x = day_of_week, y = daily_trip_count)) + 
   geom_violin(color = 'navy') +
-  geom_dotplot(binaxis = 'y', stackdir = 'center', dotsize = .4, color = "grey", alpha = .7) +
+  geom_dotplot(binwidth = 750, binaxis = 'y', stackdir = 'center', dotsize = .5, color = "grey", alpha = .7) +
   xlab("") +
-  ylab("Total Number of Daily Trips") +
-  theme(panel.grid.minor.x = element_blank(), panel.grid.major.x = element_blank())
+  ylab("Daily Total Number of Trips") +
+  theme(panel.grid.minor.x = element_blank(), panel.grid.major.x = element_blank()) +
+  ggtitle("Daily Trip Count by Day of Week")
 ```
 
 ```{r}
@@ -295,11 +312,12 @@ daily_trip_df <- bikeshare_df %>%
 daily_trip_df$day_of_week <- factor(daily_trip_df$day_of_week, levels = weekdays(x=as.Date(seq(7), origin='1950-01-01')))
 
 ggplot(daily_trip_df, aes(x = day_of_week, y = daily_trip_count)) + 
-  geom_violin(color = 'navy', fill = 'turquoise', alpha = .9) +
-  geom_dotplot(binaxis = 'y', stackdir = 'center', dotsize = .4, color = "grey", alpha = .7) +
+  geom_violin(color = 'navy', fill = 'turquoise', alpha = .8) +
+  geom_dotplot(binwidth = 750, binaxis = 'y', stackdir = 'center', dotsize = .2, color = "grey", alpha = .7) +
   xlab("") +
-  ylab("Total Number of Daily Trips") +
-  theme(panel.grid.minor.x = element_blank(), panel.grid.major.x = element_blank())
+  ylab("Daily Total Number of Trips") +
+  theme(panel.grid.minor.x = element_blank(), panel.grid.major.x = element_blank()) +
+  ggtitle("Daily Member Trip Count by Day of Week")
 ```
 
 ```{r}
@@ -312,90 +330,97 @@ daily_trip_df <- bikeshare_df %>%
 daily_trip_df$day_of_week <- factor(daily_trip_df$day_of_week, levels = weekdays(x=as.Date(seq(7), origin='1950-01-01')))
 
 ggplot(daily_trip_df, aes(x = day_of_week, y = daily_trip_count)) + 
-  geom_violin(color = 'navy', fill = 'coral', alpha = .9) +
-  geom_dotplot(binaxis = 'y', stackdir = 'center', dotsize = .4, color = "grey", alpha = .7) +
+  geom_violin(color = 'navy', fill = 'coral', alpha = .8) +
+  geom_dotplot(binwidth = 750, binaxis = 'y', stackdir = 'center', dotsize = .3, color = "grey", alpha = .7) +
   xlab("") +
-  ylab("Total Number of Daily Trips") +
-  theme(panel.grid.minor.x = element_blank(), panel.grid.major.x = element_blank())
+  ylab("Daily Total Number of Trips") +
+  theme(panel.grid.minor.x = element_blank(), panel.grid.major.x = element_blank()) +
+  ggtitle("Daily Casual Trip Count by Day of Week")
 ```
 
 ```{r}
 hourly_trip_df <- bikeshare_df %>%
-  select(started_at) %>%
-  group_by(date = as.Date(started_at), hour = substr(started_at, 12, 13)) %>%
-  summarize(daily_trip_count = length(started_at))
+  group_by(date = as.Date(started_at), hour_of_day) %>%
+  summarize(hourly_trip_count = length(hour_of_day), .groups = "drop")
 
-hourly_trip_df$hour <- paste(hourly_trip_df$hour, ":00", sep = "")
-
-ggplot(hourly_trip_df, aes(y = hour, x = daily_trip_count)) + 
+ggplot(hourly_trip_df, aes(y = hour_of_day, x = hourly_trip_count)) + 
   geom_boxplot(color = "navy", alpha = .7) +
   scale_y_discrete(limits=rev) +
-  xlab("Total Number of Daily Trips") +
+  xlab("Total Number of Trips") +
   ylab("Hour of Day") +
-  theme(panel.grid.minor.y=element_blank(), panel.grid.major.y=element_blank())
+  theme(panel.grid.minor.y=element_blank(), panel.grid.major.y=element_blank()) +
+ggtitle("Hourly Trip Count")
 ```
 
 ```{r}
 hourly_trip_df <- bikeshare_df %>%
   filter(member_casual == "member") %>% 
-  select(started_at) %>%
-  group_by(date = as.Date(started_at), hour = substr(started_at, 12, 13)) %>%
-  summarize(daily_trip_count = length(started_at))
+  group_by(date = as.Date(started_at), hour_of_day) %>%
+  summarize(hourly_trip_count = length(hour_of_day), .groups = "drop")
 
-hourly_trip_df$hour <- paste(hourly_trip_df$hour, ":00", sep = "")
-
-ggplot(hourly_trip_df, aes(y = hour, x = daily_trip_count)) + 
+ggplot(hourly_trip_df, aes(y = hour_of_day, x = hourly_trip_count)) + 
   geom_boxplot(color = "navy", alpha = .9, fill = "turquoise") +
   scale_y_discrete(limits=rev) +
-  xlab("Total Number of Daily Trips") +
+  xlab("Total Number of Trips") +
   ylab("Hour of Day") +
-  theme(panel.grid.minor.y=element_blank(), panel.grid.major.y=element_blank())
+  theme(panel.grid.minor.y=element_blank(), panel.grid.major.y=element_blank()) +
+  ggtitle("Hourly Member Trip Count")
 ```
 
 ```{r}
 hourly_trip_df <- bikeshare_df %>%
   filter(member_casual == "casual") %>% 
-  select(started_at) %>%
-  group_by(date = as.Date(started_at), hour = substr(started_at, 12, 13)) %>%
-  summarize(daily_trip_count = length(started_at))
+  group_by(date = as.Date(started_at), hour_of_day) %>%
+  summarize(hourly_trip_count = length(hour_of_day), .groups = "drop")
 
-hourly_trip_df$hour <- paste(hourly_trip_df$hour, ":00", sep = "")
-
-ggplot(hourly_trip_df, aes(y = hour, x = daily_trip_count)) + 
+ggplot(hourly_trip_df, aes(y = hour_of_day, x = hourly_trip_count)) + 
   geom_boxplot(color = "navy", alpha = .9, fill = "coral") +
   scale_y_discrete(limits=rev) +
-  xlab("Total Number of Daily Trips") +
+  xlab("Total Number of Trips") +
   ylab("Hour of Day") +
-  theme(panel.grid.minor.y=element_blank(), panel.grid.major.y=element_blank())
+  theme(panel.grid.minor.y=element_blank(), panel.grid.major.y=element_blank()) +
+  ggtitle("Hourly Casual Trip Count")
 ```
 
 ```{r}
 modified_bikeshare_df <- bikeshare_df %>% 
-  filter(trip_duration <= period(c(0, 0, 12), c('second', 'minute', 'hour')))
+  filter(trip_duration <= period(c(0, 0, 16), c('second', 'minute', 'hour')))
 ```
-
 
 ```{r}
 ggplot(modified_bikeshare_df, aes(x = as.numeric(as.duration(trip_duration), "minutes"), fill = member_casual)) +
-  geom_histogram(binwidth = 10) +
+  geom_histogram(binwidth = 10, alpha = .8) +
   scale_y_continuous(trans='log2') +
   facet_wrap(~ member_casual) +
   xlab("Duration of Trip (minutes)") +
   ylab("Logarithmic Number of Trips") +
-  guides(fill=guide_legend(title="Rider Type")) + 
-  theme(panel.grid.minor.x=element_blank(), panel.grid.major.x=element_blank())
+  guides(fill=guide_legend(title = "Rider Type")) + 
+  theme(panel.grid.minor.x=element_blank(), panel.grid.major.x=element_blank()) +
+  ggtitle("Logarithmic Count of Trips by Trip Duration")
 ```
 
+```{r}
+monthly_trip_df <- bikeshare_df %>%
+  group_by(month_of_year, member_casual) %>%
+  summarize(grouped_average_duration = mean(as.numeric(as.duration(trip_duration), "minutes"), na.rm = TRUE), grouped_std_dev = sd(as.numeric(as.duration(trip_duration), "minutes"), na.rm = TRUE), .groups = "drop")
+
+ggplot(monthly_trip_df, aes(x = month_of_year, y = grouped_average_duration, group = member_casual)) + 
+  geom_line(aes(x = month_of_year, y = grouped_average_duration, color = member_casual, linetype = member_casual)) +
+  geom_ribbon(aes(ymin = grouped_average_duration - grouped_std_dev, ymax = grouped_average_duration + grouped_std_dev, fill = member_casual), alpha = 0.2) +
+  xlab(" ") +
+  ylab("Average Trip Duration (minutes)") +
+  scale_x_discrete(labels = c(paste(month.abb[c(4:12)], 2020), paste(month.abb[c(1:3)], 2021))) +
+  guides(color = guide_legend(title = "Rider Type"), fill = guide_legend(title = "Rider Type"), linetype = guide_legend(title = "Rider Type")) +
+  ggtitle("Average Trip Duration by Month of Year")
+```
 
 ```{r}
 start_station_df <- bikeshare_df %>% 
   filter(start_station_name != "") %>% 
+  with_groups(start_station_name, mutate, start_lat = mlv(start_lat, method = "mfv")[1], start_lng = mlv(start_lng, method = "mfv")[1]) %>% 
   group_by(member_casual, start_station_name) %>%
-  summarize(trip_count = length(start_station_name), start_lat = mlv(start_lat, method = "mfv"), start_lng = mlv(start_lng, method = "mfv")) %>% 
-  arrange(desc(trip_count)) %>% 
-  distinct(member_casual, start_station_name, .keep_all = TRUE) %>%
-  ungroup
-
+  summarize(trip_count = length(start_station_name), start_lat = first(start_lat), start_lng = first(start_lng), .groups = "drop_last")
+  
 start_station_df
 ```
 
@@ -407,75 +432,132 @@ basemap <- ggmap(get_stamenmap(c(left = min(start_station_df$start_lng) - .05,
                   maptype = "toner-lite", zoom = 11))
 
 basemap + 
-  geom_point(aes(x = start_lng, y = start_lat), data = start_station_df, color = "navy", size = 0.5)
+  geom_point(aes(x = start_lng, y = start_lat), data = start_station_df, color = "navy", size = 0.5) +
+  theme_nothing()
 ```
 
 ```{r}
-top_member_start_station_df <- start_station_df %>% 
-  filter(member_casual == "member") %>%
+top_start_df <- start_station_df %>% 
   slice_max(trip_count, n = 50)
 
-top_casual_start_station_df <- start_station_df %>% 
-  filter(member_casual == "casual") %>%
-  slice_max(trip_count, n = 50)
-
-basemap <- ggmap(get_stamenmap(c(left = min(top_member_start_station_df$start_lng) - .05,
-                  bottom = min(top_member_start_station_df$start_lat) - .01,
-                  right = max(top_member_start_station_df$start_lng) + .05,
-                  top = max(top_member_start_station_df$start_lat)) + .01,
+basemap <- ggmap(get_stamenmap(c(left = min(top_start_df$start_lng) - .05,
+                  bottom = min(top_start_df$start_lat) - .01,
+                  right = max(top_start_df$start_lng) + .05,
+                  top = max(top_start_df$start_lat)) + .01,
                   maptype = "toner-lite", zoom = 13))
 
 basemap + 
-  geom_point(aes(x = start_lng, y = start_lat, size = trip_count), data = top_member_start_station_df, color = "turquoise", alpha = .7) + 
-  geom_point(aes(x = start_lng, y = start_lat, size = trip_count), data = top_casual_start_station_df, color = "coral", alpha = .7) +
-  xlab("Longitude") +
-  ylab("Latitude") +
-  facet_wrap(~ member_casual)
+  geom_point(aes(x = start_lng, y = start_lat, size = trip_count, color = member_casual), data = top_start_df, alpha = .7) +
+  facet_wrap(~ member_casual) +
+  xlab(" ") +
+  ylab(" ") +
+  guides(size = "none", color = guide_legend(title="Rider Type")) +
+  theme(axis.text = element_blank(), axis.ticks = element_blank(), axis.title = element_blank())
+```
+
+```{r}
+member_start_df <- start_station_df %>% filter(member_casual == "member") %>% 
+  slice_max(trip_count, n = 50)
+
+label_meta <- member_start_df
+number_of_bars <- nrow(label_meta)
+angle <-  90 - 360 * (c(1:number_of_bars) - 0.5) / number_of_bars
+label_meta$hjust <- ifelse(angle < -90, 1, 0)
+label_meta$angle <- ifelse(angle < -90, angle + 180, angle)
+
+ggplot(member_start_df, aes(x = as.factor(reorder(start_station_name, trip_count)), y = trip_count)) +
+  geom_bar(stat = "identity", fill = "turquoise", alpha = .8) +
+  ylim(-10000, 20000) +
+  theme(axis.text = element_blank(), axis.ticks = element_blank(), axis.title = element_blank(), plot.margin = unit(rep(-1, 4), "cm")) +
+  coord_polar() +
+  geom_text(data = label_meta, aes(x = start_station_name, y = trip_count, label = paste(start_station_name, trip_count, sep = ": "), hjust = hjust), color = "black", fontface = "bold", alpha = 0.6, size = 2.5, angle = -label_meta$angle, inherit.aes = FALSE) 
+```
+
+```{r}
+casual_start_df <- start_station_df %>% filter(member_casual == "casual") %>% 
+  slice_max(trip_count, n = 50)
+
+label_meta <- casual_start_df
+number_of_bars <- nrow(label_meta)
+angle <-  90 - 360 * (c(1:number_of_bars) - 0.5) / number_of_bars
+label_meta$hjust <- ifelse(angle < -90, 1, 0)
+label_meta$angle <- ifelse(angle < -90, angle + 180, angle)
+
+ggplot(casual_start_df, aes(x = as.factor(reorder(start_station_name, trip_count)), y = trip_count)) +
+  geom_bar(stat = "identity", fill = "coral", alpha = .8) +
+  ylim(-15000, 27500) +
+  xlab(" ") +
+  ylab(" ") +
+  theme(axis.text = element_blank(), axis.ticks = element_blank(), axis.title = element_blank(), plot.margin = unit(rep(-1, 4), "cm")) +
+  coord_polar() +
+  geom_text(data = label_meta, aes(x = start_station_name, y = trip_count, label = paste(start_station_name, trip_count, sep = ": "), hjust = hjust), color = "black", fontface = "bold", alpha = 0.6, size = 2.5, angle = -label_meta$angle, inherit.aes = FALSE)
 ```
 
 ```{r}
 end_station_df <- bikeshare_df %>% 
   filter(end_station_name != "") %>% 
+  with_groups(end_station_name, mutate, end_lat = mlv(end_lat, method = "mfv")[1], end_lng = mlv(end_lng, method = "mfv")[1]) %>% 
   group_by(member_casual, end_station_name) %>%
-  summarize(trip_count = length(end_station_name), end_lat = mlv(end_lat, method = "mfv"), end_lng = mlv(end_lng, method = "mfv")[1]) %>% 
-  arrange(desc(trip_count)) %>% 
-  distinct(member_casual, end_station_name, .keep_all = TRUE) %>%
-  ungroup
+  summarize(trip_count = length(end_station_name), end_lat = first(end_lat), end_lng = first(end_lng), .groups = "drop_last")
 
 end_station_df
 ```
 
 ```{r}
-top_member_end_station_df <- end_station_df %>%
-  filter(member_casual == "member") %>%
+top_end_df <- end_station_df %>% 
   slice_max(trip_count, n = 50)
 
-top_casual_end_station_df <- end_station_df %>%
-  filter(member_casual == "casual") %>%
-  slice_max(trip_count, n = 50)
-
-basemap <- ggmap(get_stamenmap(c(left = min(top_member_end_station_df$end_lng) - .05,
-                  bottom = min(top_member_end_station_df$end_lat) - .01,
-                  right = max(top_member_end_station_df$end_lng) + .05,
-                  top = max(top_member_end_station_df$end_lat)) + .01,
+basemap <- ggmap(get_stamenmap(c(left = min(top_end_df$end_lng) - .05,
+                  bottom = min(top_end_df$end_lat) - .01,
+                  right = max(top_end_df$end_lng) + .05,
+                  top = max(top_end_df$end_lat)) + .01,
                   maptype = "toner-lite", zoom = 13))
 
 basemap + 
-  geom_point(aes(x = end_lng, y = end_lat, size = trip_count), data = top_member_end_station_df, color = "turquoise", alpha = .7) + 
-  geom_point(aes(x = end_lng, y = end_lat, size = trip_count), data = top_casual_end_station_df, color = "coral", alpha = .7) +
-  xlab("Longitude") +
-  ylab("Latitude") +
-  facet_wrap(~ member_casual)
+  geom_point(aes(x = end_lng, y = end_lat, size = trip_count, color = member_casual), data = top_end_df, alpha = .7) + 
+  facet_wrap(~ member_casual) +
+  xlab(" ") +
+  ylab(" ") +
+  guides(size = "none", color = guide_legend(title="Rider Type")) +
+  theme(axis.text = element_blank(), axis.ticks = element_blank(), axis.title = element_blank())
+```
+
+```{r}
+member_end_df <- end_station_df %>% filter(member_casual == "member") %>% 
+  slice_max(trip_count, n = 50)
+
+casual_end_df <- end_station_df %>% filter(member_casual == "casual") %>% 
+  slice_max(trip_count, n = 50)
+
+empty_bar <- 5
+empty_block <- bind_rows(head(member_end_df, n = empty_bar), head(casual_end_df, n = empty_bar))
+empty_block[-1] <- na_if(empty_block[-1], empty_block[-1])
+end_station_df <- bind_rows(member_end_df, casual_end_df, empty_block)
+end_station_df <- end_station_df %>% arrange(member_casual)
+end_station_df$id <- seq(1, nrow(end_station_df))
+
+label_meta <- end_station_df
+number_of_bars <- nrow(label_meta)
+angle <-  90 - 360 * (c(1:number_of_bars) - 0.5) / number_of_bars
+label_meta$hjust <- ifelse(angle < -90, 1, 0)
+label_meta$angle <- ifelse(angle < -90, angle + 180, angle)
+
+ggplot(end_station_df, aes(x = as.factor(id), y = trip_count, fill = member_casual)) +
+  geom_bar(stat = "identity", alpha = .8) +
+  ylim(-5000, 40000) +
+  guides(fill=guide_legend(title="Rider Type")) +
+  theme(axis.text = element_blank(), axis.ticks = element_blank(), axis.title = element_blank(), plot.margin = unit(rep(-1, 4), "cm")) +
+  coord_polar() +
+  geom_text(data = label_meta, aes(x = id, y = trip_count, label = paste(end_station_name, trip_count, sep = ": "), hjust = hjust), color = "black", fontface = "bold", alpha = 0.6, size = 2.5, angle = label_meta$angle, inherit.aes = FALSE) 
 ```
 
 ```{r}
 route_df <- bikeshare_df %>%
   filter(start_station_name != "" & end_station_name != "" & start_station_name != end_station_name) %>% 
-  with_groups(start_station_name, mutate, std_start_lat = mlv(start_lat, method = "mfv")[1], std_start_lng = mlv(start_lng, method = "mfv")[1]) %>% 
-  with_groups(end_station_name, mutate, std_end_lat = mlv(end_lat, method = "mfv")[1], std_end_lng = mlv(end_lng, method = "mfv")[1]) %>% 
-  group_by(started_hour = paste(substr(started_at, 12, 13), ":00:00", sep = ""), member_casual, std_start_lat, std_start_lng, std_end_lat, std_end_lng) %>% 
-  summarize(route_count = length(std_end_lng)) %>% 
-  ungroup() %>% 
+  with_groups(start_station_name, mutate, start_lat = mlv(start_lat, method = "mfv")[1], start_lng = mlv(start_lng, method = "mfv")[1]) %>% 
+  with_groups(end_station_name, mutate, end_lat = mlv(end_lat, method = "mfv")[1], end_lng = mlv(end_lng, method = "mfv")[1]) %>% 
+  group_by(started_hour = paste(hour_of_day, "00", sep = ":"), member_casual, start_lat, start_lng, end_lat, end_lng) %>% 
+  summarize(route_count = length(end_lng), .groups = "drop") %>% 
   group_by(started_hour, member_casual) %>% 
   slice_max(na.omit(route_count), n = 10) %>% 
   ungroup()
@@ -485,15 +567,15 @@ route_df
 
 ```{r}
 basemap <- ggmap(get_stamenmap(
-                c(left = min(route_df$std_start_lng, route_df$std_end_lng) - .05,
-                  bottom = min(route_df$std_start_lat, route_df$std_end_lat) - .01,
-                  right = max(route_df$std_start_lng, route_df$std_end_lng) + .05,
-                  top = max(route_df$std_start_lat, route_df$std_end_lat)) + .01,
+                c(left = min(route_df$start_lng, route_df$end_lng) - .05,
+                  bottom = min(route_df$start_lat, route_df$end_lat) - .01,
+                  right = max(route_df$start_lng, route_df$end_lng) + .05,
+                  top = max(route_df$start_lat, route_df$end_lat)) + .01,
                   maptype = "toner-lite", zoom = 12))
 
  route_time_lapse = basemap +
  geom_curve(data = route_df,
- aes(x = std_start_lng, y = std_start_lat, xend = std_end_lng, yend = std_end_lat, color = member_casual, group = started_hour),    
+ aes(x = start_lng, y = start_lat, xend = end_lng, yend = end_lat, color = member_casual, group = started_hour),    
  arrow = arrow(angle = 15, length = unit(0.3, "cm"), type = "closed"),
  alpha = 0.8, curvature = 0.25, inherit.aes = TRUE) +
  scale_size_continuous(range = c(1, 30)) +
@@ -505,35 +587,80 @@ basemap <- ggmap(get_stamenmap(
   exit_shrink() +
   ease_aes('sine-in-out')
 
-animate(route_time_lapse, duration = 25, height = 800, width = 600)
+animate(route_time_lapse, duration = 45, height = 800, width = 600)
 
 anim_save("route_time_lapse.gif")
 ```
 
 ```{r}
-freq_routes_df <- bikeshare_df %>%
-  filter(start_station_name != "" & end_station_name != "" & start_station_name != end_station_name) %>% 
-  mutate(route_name = ifelse(start_station_name < end_station_name, paste(start_station_name, end_station_name, sep = " - "), paste(end_station_name, start_station_name, sep = " - "))) %>% 
-  group_by(member_casual, route_name) %>% 
-  summarize(subgroup_route_count = length(route_name)) %>% 
-  ungroup() %>% 
-  with_groups(route_name, mutate, route_count = sum(subgroup_route_count)) %>% 
-  slice_max(na.omit(route_count), n = 30) %>%  
-  mutate(axis1 = str_extract(route_name, "^[A-Za-z0-9& ]+(?= - )"), axis2 = str_extract(route_name, "(?<= - )[A-Za-z0-9& ]+$"))
+start_station_df <- bikeshare_df %>%
+  filter(start_station_name != "" & end_station_name != "") %>%
+  group_by(start_station_name) %>% 
+  summarize(start_count = length(start_station_name))
 
-freq_routes_df
+end_station_df <- bikeshare_df %>%
+  filter(end_station_name != "" & end_station_name != "") %>%
+  group_by(end_station_name) %>% 
+  summarize(end_count = length(end_station_name))
+
+station_df <- start_station_df %>% 
+  full_join(end_station_df, by = c("start_station_name" = "end_station_name")) %>% 
+  replace_na(list(start_station_name = "unknown", start_count = 0, end_count = 0)) %>% 
+  rename(station_name = start_station_name) %>% 
+  mutate(total = start_count + end_count) %>% 
+  slice_max(na.omit(total), n = 20)
+  
+station_df
 ```
 
 ```{r}
-ggplot(freq_routes_df, aes(y = subgroup_route_count, axis1 = axis1, axis2 = axis2)) +
-  geom_alluvium(aes(fill = member_casual), width = 1/12) +
-  geom_stratum(width = 1/12, fill = "grey", color = "white") +
-  geom_label(stat = "stratum", aes(label = str_wrap(after_stat(stratum), 25)), size = 3, fill = "light grey") +
-  scale_fill_manual(values = c("coral", "turquoise")) +
-  ylab(" ") +
-  guides(fill=guide_legend(title="Rider Type")) + 
-  labs(title = "Most Frequent Bike Routes (Bidirectional)") +
-  theme(axis.text.x = element_blank(), axis.text.y = element_blank(), panel.grid.minor.x = element_blank(), panel.grid.major.x = element_blank(), panel.grid.minor.y = element_blank(), panel.grid.major.y = element_blank())
+stations <- station_df$station_name
+
+member_adjacency <- bikeshare_df %>% 
+  filter(member_casual == "member" & start_station_name %in% stations & end_station_name %in% stations) %>% 
+  group_by(start_station_name, end_station_name) %>% 
+  summarize(count = length(end_station_name), .groups = "drop") %>% 
+  rename(depart = start_station_name, arrive = end_station_name) %>% 
+  pivot_wider(names_from = arrive, values_from = count)
+
+chord_vector <- vector()
+for (i in 1:nrow(member_adjacency)) {
+  chord_vector <- c(chord_vector, member_adjacency[-1] %>% slice(i) %>% as.numeric())
+}
+
+chord_matrix <- matrix(chord_vector, nrow = nrow(member_adjacency), ncol = nrow(member_adjacency), byrow = TRUE)
+
+colors_swatches <- c("#a9a9a9", "#778899", "#696969", "#ffffd0", "#ffff85", "#ffd700", "#ffa808", "#ff7f50", "#deb887", "#da8520", "#8fbc8f", "#32cd32", "#90ee90", "#afeeee", "#48d1cc", "#00a3a3", "#00bfff", "#1e90ff", "#4169e1", "#3b3bff")
+
+stations <- colnames(member_adjacency)[-1]
+
+dimnames(chord_matrix) <- list(depart = stations, arrive = stations)
+
+chorddiag(chord_matrix, groupColors = colors_swatches, groupnameFontsize = 10, groupnamePadding = 5, showTicks = FALSE)
+```
+
+```{r}
+casual_adjacency <- bikeshare_df %>% 
+  filter(member_casual == "casual" & start_station_name %in% stations & end_station_name %in% stations) %>% 
+  group_by(start_station_name, end_station_name) %>% 
+  summarize(count = length(end_station_name), .groups = "drop") %>% 
+  rename(depart = start_station_name, arrive = end_station_name) %>% 
+  pivot_wider(names_from = arrive, values_from = count)
+
+chord_vector <- vector()
+for (i in 1:nrow(casual_adjacency)) {
+  chord_vector <- c(chord_vector, casual_adjacency[-1] %>% slice(i) %>% as.numeric())
+}
+
+chord_matrix <- matrix(chord_vector, nrow = nrow(casual_adjacency), ncol = nrow(casual_adjacency), byrow = TRUE)
+
+colors_swatches <- c("#a9a9a9", "#778899", "#696969", "#ffffd0", "#ffff85", "#ffd700", "#ffa808", "#ff7f50", "#deb887", "#da8520", "#8fbc8f", "#32cd32", "#90ee90", "#afeeee", "#48d1cc", "#00a3a3", "#00bfff", "#1e90ff", "#4169e1", "#3b3bff")
+
+stations <- colnames(casual_adjacency)[-1]
+
+dimnames(chord_matrix) <- list(depart = stations, arrive = stations)
+
+chorddiag(chord_matrix, groupColors = colors_swatches, groupnameFontsize = 10, groupnamePadding = 5, showTicks = FALSE)
 ```
 
 ```{r}
@@ -542,12 +669,10 @@ freq_routes_df <- bikeshare_df %>%
   mutate(route_name = ifelse(start_station_name < end_station_name, paste(start_station_name, end_station_name, sep = " - "), paste(end_station_name, start_station_name, sep = " - "))) %>%
   with_groups(c(route_name, month_of_year), mutate, route_count = length(month_of_year)) %>%
   group_by(month_of_year, route_name, member_casual) %>%
-  summarize(subgroup_route_count = length(month_of_year), route_count = first(route_count), .groups = "keep") %>%
-  ungroup() %>%
+  summarize(subgroup_route_count = length(month_of_year), route_count = first(route_count), .groups = "drop") %>%
   group_by(month_of_year) %>% 
   slice_max(na.omit(route_count), n = 10) %>% 
-  ungroup() %>% 
-  mutate(axis1 = str_extract(route_name, "^[A-Za-z0-9&(). ]+(?= - )"), axis2 = str_extract(route_name, "(?<= - )[A-Za-z0-9&(). ]+$"))
+  ungroup()
 
 temp_df <- freq_routes_df %>% filter(subgroup_route_count == route_count)
 
@@ -559,14 +684,15 @@ freq_routes_df
 ```
 
 ```{r}
-ggplot(freq_routes_df, aes(y = route_name, x = subgroup_route_count, fill = member_casual, group = member_casual)) +
-  geom_bar(position="dodge", stat="identity") + 
-  facet_grid(month_of_year ~ ., scales = "free", space = "free") +
+month_mapper <- c(paste(month.abb[c(4:12)], 2020), paste(month.abb[c(1:3)], 2021))
+names(month_mapper) <- levels(bikeshare_df$month_of_year)
+
+ggplot(freq_routes_df, aes(y = route_name, x = subgroup_route_count, fill = member_casual)) +
+  geom_bar(position = "dodge", stat = "identity") + 
+  facet_grid(month_of_year ~ ., scales = "free", space = "free", labeller = as_labeller(month_mapper)) +
   xlab("Total Number of Trips (bidirectional)") +
   ylab(" ") +
   guides(fill=guide_legend(title="Rider Type")) + 
   labs(title = "Most Frequent Monthly Bike Routes (Bidirectional)")
 ```
-
-
 
