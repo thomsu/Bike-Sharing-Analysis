@@ -3,9 +3,31 @@ title: "Bike Sharing Analysis"
 output: html_notebook
 ---
 
-This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+## Cyclistic Bikeshare Analysis (May 4, 2021)
 
-Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+### Project Overview
+
+This capstone project is part of the Google Data Analytics Professional Certificate on Coursera. The project assumes the following senerio. Being a junior data analyst on the marketing team at Cyclistic, a bike-sharing company in Chicago, **I was assigned to analyze how Cyclistic riders without annual membership, which is the group of interest for this project, use Cyclistic bikes differently than Cyclistic member riders.** Cyclistic riders without annual membership are referred to as casual riders. The financial analysts in the company have concluded that annual members are more profitable than casual riders. The director of marketing believes that  maximizing the number of annual members by converting casual riders into members is the right business strategy to ensure future growth and company's success. Rather than employing a broad-based marketing campaign, the director of marketing is considering using social media for a targeted marketing strategy.
+
+### Project Goals
+I'll be searching for patterns and trends in a variety of metrics that would show casual riders usage of Cyclistic bike differ from member usage of Cyclistic bike. Some of the metrics to consider are:
+
+- Type of bike preference
+- Day of week riding pattern
+- Time of day riding pattern
+- Duration of trip
+- Most frequent stations
+- Most frequent routes (start & end station pairs)
+
+### Data Preparation
+
+In the fictitious scenario, I get all my data internally but I'm refrained from using data that has any personal identifiable information. In reality, I'm provided with a public dataset online licensed by Motivate International. For this project, I'm using data that contains information about each ride, like time and location of the start and end of a bike trip, from April 2020 to March 2021. 
+
+Please note that Covid 19 pandemic began in March 2020 in the US and Covid 19 lockdown and/or restrictive measures are in place for most of if not the entire period. This include shutting down of businesses that are not essential services, limited restaurant dining seating and travel restrictions. 
+
+There are pros and cons about using this data. One of the benefits is that since travel is fairly restricted, the tourist usage of Cyclistic bike should be minimal. As there is no way to filter out based on personal information, using this data for analysis is ideal. However, how riders utilize Cyclistic bike during the pandemic may be different from how riders bike in normal times. Many people work from home and are no longer commuting daily. The patterns and trends from this data may not be representive of patterns and trends post-pandemic. This is something we need to keep in mind when looking at the results.
+
+First, I wrote some code to create a new folder for this project, `Chicago_Bike_Share` in the current directory and switch directory to the new folder. Simply execute the code by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. The results will appear beneath the code. Please run all the code chunks in order.
 
 ```{r}
 library(knitr)
@@ -19,6 +41,8 @@ if (!dir.exists(project_folder)) {
 knitr::opts_knit$set(root.dir = project_folder)
 ```
 
+Here, we install and import the packages needed for this project.
+
 ```{r}
 packages <- c("dplyr", "DBI", "skimr", "stringr", "tidyr", "tibble", "lubridate", "geosphere", "ggplot2", "ggmap", "ggthemes", "gridExtra", "gganimate", "modeest", "chorddiag", "htmlwidgets")
 
@@ -29,7 +53,10 @@ for (pkg in packages) {
 }
 ```
 
+Now, we create a vector of web links where the data is located online. We also create a vector of CSV file names that correspond to each of the links.
+
 ```{r}
+# create a vector of url links to the data
 url_start <- 'https://divvy-tripdata.s3.amazonaws.com/'
 dates <- format(seq(as.Date("2020/4/1"), as.Date("2021/3/1"), "months"), "%Y%m")
 url_end <- '-divvy-tripdata.zip'
@@ -39,6 +66,7 @@ for (date in dates) {
   full_url <- append(full_url, paste(url_start, date, url_end, sep=''))
 }
 
+# create a vector of CSV file name for each link
 filenames <- vector()
 start_index <- nchar(url_start) + 1L
 
@@ -47,6 +75,8 @@ for (url_link in full_url) {
   filenames <- append(filenames, paste(substr(url_link, start_index, end_index),'.csv',sep=''))
 }
 ```
+
+Next, we create a new SQL database and add an empty table with the columns names.
 
 ```{r}
 connect <- dbConnect(RSQLite::SQLite(), "local_sqldb.sqlite", extended_type=TRUE)
@@ -65,12 +95,15 @@ field_names <-  c("ride_id" = "TEXT",
     "end_lng" = "REAL",
     "member_casual" = "TEXT")
 
+# checks to see that the table does not exist before creating
 if (!dbExistsTable(connect, "bikeshare")) {
   dbCreateTable(connect, "bikeshare", field_names)
 }
 
 dbDisconnect(connect)
 ```
+
+Now, we download and unzip the data, open the file in R and append the data in the SQL table that we just created.
 
 ```{r}
 connect <- dbConnect(RSQLite::SQLite(), "local_sqldb.sqlite", extended_type=TRUE)
@@ -93,6 +126,8 @@ dbClearResult(query)
 dbDisconnect(connect)
 ```
 
+We are now ready to read the whole table stored in our SQL database into R.
+
 ```{r}
 connect <- dbConnect(RSQLite::SQLite(), "local_sqldb.sqlite", extended_type=TRUE)
 
@@ -102,13 +137,21 @@ head(bikeshare_df)
 dbDisconnect(connect)
 ```
 
+Let's check out the metadata summary with skimr.
+
 ```{r}
 skim(bikeshare_df)
 ```
 
+There is so much useful information here. The table consist of 3,489,748 rows and 13 columns. 7 columns are of character data type and 6 are of numeric data type. None of the character type columns are unique. Upon further investigation, none of the columns are unique and therefore could not be used as a primary key for the SQL table. Although there are no missing values for character type columns, there are 122,175 empty strings found in start_station_name and 143,242 empty strings in end_station_id. As for numeric columns, start_station_id, end_station_id, end_lat, end_lng contain missing values.
+
+Next, let's check to see how many rows contain at least a missing value.
+
 ```{r}
 print(paste("There are", nrow(bikeshare_df[!complete.cases(bikeshare_df),]), "rows with missing values, excluding empty fields.", sep = " "))
 ```
+
+We are going to first check on missing values starting with the start_id column.
 
 ```{r}
 bikeshare_df %>%
@@ -116,12 +159,20 @@ bikeshare_df %>%
   head()
 ```
 
+It is curious that the date from started_at column begins from July 2020. The start_station_name column are empty while end_station_name and end_station_id contain some information.
+
+I want to check out the empty strings at the start_station_name column to look for any pattern.
+
 ```{r}
 bikeshare_df %>%
   filter(start_station_name == '') %>% 
   arrange(started_at) %>% 
   head()
 ```
+
+The date from the started_at column also begins in July, 2020. Both start_station_id and start_station_name contains no information. I noticed that the rideble_type are all electic_bike just like the previous result.
+
+I want to see the same results but for dates closest to the present.
 
 ```{r}
 bikeshare_df %>%
@@ -130,6 +181,12 @@ bikeshare_df %>%
   head()
 ```
 
+The dates are in March, 2021. The rideable_type entries are only electic_bike. However, both start_station_id and end_station_id are 0 while start_station_name and end_station_name are empty strings.
+
+I'm beginning to think that there is a relationship between electric bikes and the missing data.
+
+Next, we are going to examine observations with start_station_id but with no information on start_station_name.
+
 ```{r}
 bikeshare_df %>%
   filter(start_station_name == '' & !is.na(start_station_id)) %>% 
@@ -137,18 +194,32 @@ bikeshare_df %>%
   head()
 ```
 
+The rideable_type entries are still electric_bike but the date starts from December 2021. While the start_station_id entries are 0, the values in the start_lat and the start_lng are not unique, indicating that start_station_id is not at one particular location.
+
+Including start_station_id and end_station_id that are 0 can still be useful for some analyses while it can be problematic for other types of analyses. This is something that we also need to keep in mind.
+
+Next, we are going to check out the same results but for dates closest to the present.
+
 ```{r}
 bikeshare_df %>%
   filter(start_station_name == '' & !is.na(start_station_id)) %>% 
   arrange(desc(started_at)) %>% 
   head()
 ```
+
+The same pattern keeps emerging: electic_bike for rideable_type, 0 for start_station_id and start_lat, start_lng do not contain unique values even as the start_station_id are the same.
+
+We are going to examine the count of start_station_name that are not empty with start_station_id entries equal to 0.
 
 ```{r}
 bikeshare_df %>%
   filter(start_station_name != '' & start_station_id == 0) %>% 
   summarize(name_count = n_distinct(start_station_name)) 
 ```
+
+This is further confirmation that station_id 0 is not at some specific location.
+
+The following 2 code chunks check to see if there are any station_id that is not 0 or missing that has empty string for station_name
 
 ```{r}
 bikeshare_df %>%
