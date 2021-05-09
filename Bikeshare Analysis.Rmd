@@ -1,6 +1,8 @@
 ---
 title: "Bike Sharing Analysis"
-output: html_notebook
+output:
+  html_document:
+    df_print: paged
 ---
 
 ## Cyclistic Bikeshare Analysis (May 4, 2021)
@@ -217,9 +219,9 @@ bikeshare_df %>%
   summarize(name_count = n_distinct(start_station_name)) 
 ```
 
-This is further confirmation that station_id 0 is not at some specific location.
+This is further confirmation that station_id 0 is not at some specific location. Using station_name would be a better choice for analysis than using station_id
 
-The following 2 code chunks check to see if there are any station_id that is not 0 or missing that has empty string for station_name
+The following 2 code chunks check to see if there are any station_id that is not 0 or missing that have empty string for station_name
 
 ```{r}
 bikeshare_df %>%
@@ -233,6 +235,10 @@ bikeshare_df %>%
   head()
 ```
 
+If the station_id is not 0 or missing, the station_name is not an empty string.
+
+Now, let's run the following 2 code chunks to check if there are any rows where the rideable_type is not electric_bike and the station_name is an empty string.
+
 ```{r}
 bikeshare_df %>%
   filter(start_station_name == '' & rideable_type != 'electric_bike') %>% 
@@ -245,6 +251,10 @@ bikeshare_df %>%
   head()
 ```
 
+The results is quite unexpected. There are no classic_bike or docked_bike with empty start_station_name string but there are non electric_bike with empty end_station_name string. Curiously enough, the end_lat and end_lng are also misiing but not ended_at for rows with empty end_station_name string. I don't know what to make of this subset.
+
+Next, let's check which start_station_id have more than one start_station_name.
+
 ```{r}
 search_result <- bikeshare_df %>% 
   filter(!is.na(start_station_id) & start_station_id != 0) %>%
@@ -255,6 +265,10 @@ search_result <- bikeshare_df %>%
 search_result
 ```
 
+There are 23 start_station_id with 2 different names.
+
+Let's check our the start_station_name for these station_id.
+
 ```{r}
 bikeshare_df %>% 
   select(start_station_id, start_station_name) %>% 
@@ -262,6 +276,10 @@ bikeshare_df %>%
   group_by(start_station_id, start_station_name) %>% 
   summarize()
 ```
+
+It looks like some stations are moved to a different location while some temperary stations became permanent.
+
+We are going to look at start_station_name with more than one start_station_id
 
 ```{r}
 search_result <- bikeshare_df %>% 
@@ -273,6 +291,10 @@ search_result <- bikeshare_df %>%
 search_result
 ```
 
+There are 279 start_station_name with two different start_station_id.
+
+Let's find out the start_station_id for the station_name.
+
 ```{r}
 bikeshare_df %>% 
   select(start_station_id, start_station_name) %>% 
@@ -281,11 +303,21 @@ bikeshare_df %>%
   summarize(.groups = "drop")
 ```
 
+There stations have one thing in common. One of the station is 2-3 digits and the other is 5 digits.
+
+Let's check to see if there are any rows where start_station_name and end_station_name are the same.
+
 ```{r}
 bikeshare_df %>% 
   filter(start_station_name == end_station_name & start_station_id != 0) %>% 
   head()
 ```
+
+It maybe worth checking these round trips later.
+
+### Engineering Features
+
+Let's create some features based on started_at.
 
 ```{r}
 bikeshare_df <- bikeshare_df %>% 
@@ -297,6 +329,8 @@ bikeshare_df <- bikeshare_df %>%
 head(bikeshare_df)
 ```
 
+We now create two new features about the trip: trip_duraton and trip_distance.
+
 ```{r}
 mile_conversion = 0.0006213711922373339
 
@@ -307,6 +341,8 @@ bikeshare_df <- mutate(bikeshare_df, trip_distance = distHaversine(cbind(start_l
 head(bikeshare_df)
 ```
 
+Let's now check out the histogram of the trip_duration that we just created.
+
 ```{r}
 ggplot(bikeshare_df  %>% filter(start_station_name == end_station_name & start_station_id != 0), aes(x = as.numeric(as.duration(trip_duration), "minutes"))) + geom_histogram(binwidth = 5) +
   xlim(-180, 1600) +
@@ -316,11 +352,17 @@ ggplot(bikeshare_df  %>% filter(start_station_name == end_station_name & start_s
   ggtitle("Logarithmic Count of Trips Starting and Ending at the Same Location")
 ```
 
+The distribution is skewed to the right and it appears that there are some trips with negative trip_duration.
+
 ```{r}
 bikeshare_df %>% 
   filter(trip_duration < period(c(0, 0), c('second', 'minute'))) %>% 
   arrange(trip_duration)
 ```
+
+My first intuition is that this is the result of time change that happens twice a year. The results above show many different dates and this is clearly bad data.
+
+We are going to remove the rows of bad data.
 
 ```{r}
 bikeshare_df <- bikeshare_df %>% 
@@ -329,10 +371,16 @@ bikeshare_df <- bikeshare_df %>%
 bikeshare_df %>% arrange(desc(trip_duration))
 ```
 
+In additional, we'll remove trips that are less than five minutes where the start_station_name and the end_station_name are the same.
+
 ```{r}
 bikeshare_df <- bikeshare_df %>% 
   filter(start_station_name != end_station_name | (start_station_name == end_station_name & trip_duration > period(c(0, 5), c('second', 'minute'))))
 ```
+
+### Data Visualization
+
+The first graph we are going to build will show member and casual riders usage of the different bike type.
 
 ```{r}
 ggplot(bikeshare_df, aes(x = rideable_type, fill = member_casual)) +
@@ -345,6 +393,10 @@ ggplot(bikeshare_df, aes(x = rideable_type, fill = member_casual)) +
   ggtitle("Rider Usage by Type of Bike")
 ```
 
+Overall, docked_bike has the highest number of trip of the three different bike types. It is true for both groups of riders. However, the initial exploration of data hints that electric_bike may have been a new addition to the bike fleet. The empty station_name string and missing station_id may have been due to the addition of new bike stations for electric bikes. 
+
+Next, let's build a bar chart to show the average trip duration of member and casual riders for the three different bike types.
+
 ```{r}
 ggplot(bikeshare_df, aes(x = rideable_type, y = as.numeric(as.duration(trip_duration), "minutes"), fill = member_casual)) +
   geom_bar(position = "dodge", stat = "summary", fun = "mean", alpha = .8) +
@@ -355,6 +407,10 @@ ggplot(bikeshare_df, aes(x = rideable_type, y = as.numeric(as.duration(trip_dura
   theme(panel.grid.minor.x = element_blank(), panel.grid.major.x = element_blank()) +
   ggtitle("Average Trip Duration by Type of Bike")
 ```
+
+While the average trip duration is roughly the same for member riders at about 15 minutes, the average time casual riders spend on the three different bikes varies much more. On average, casual riders spend the most time on docked_bike, 52 minutes, and least on electric_bike, 22 minutes.
+
+Let's now check out how the total number of trips vary by the day of week.
 
 ```{r}
 daily_trip_df <- bikeshare_df %>%
@@ -372,6 +428,10 @@ ggplot(daily_trip_df, aes(x = day_of_week, y = daily_trip_count)) +
   theme(panel.grid.minor.x = element_blank(), panel.grid.major.x = element_blank()) +
   ggtitle("Daily Trip Count by Day of Week")
 ```
+
+There are a few Saturdays during the twelve month period with daily trip totals higher than any other day of the week. Tuesday, Wednesday and Thursday have similar distribution of daily trip totals.
+
+We are now constructing the same plot for just the member group.
 
 ```{r}
 daily_trip_df <- bikeshare_df %>%
@@ -391,6 +451,10 @@ ggplot(daily_trip_df, aes(x = day_of_week, y = daily_trip_count)) +
   ggtitle("Daily Member Trip Count by Day of Week")
 ```
 
+Overall, the distribution of the daily trip totals for the different days of the week looks similar with just a slight variation.
+
+Here is the plot for the casual riders.
+
 ```{r}
 daily_trip_df <- bikeshare_df %>%
   filter(member_casual == 'casual') %>%
@@ -409,6 +473,10 @@ ggplot(daily_trip_df, aes(x = day_of_week, y = daily_trip_count)) +
   ggtitle("Daily Casual Trip Count by Day of Week")
 ```
 
+With the exception on one Monday, there are a few Fridays, Saturdays and Sundays that is higher than the rest of the week. Casual riders are more likely to bike on weekends.
+
+The following chart breaks down the count daily count of trips by hour of day.
+
 ```{r}
 hourly_trip_df <- bikeshare_df %>%
   group_by(date = as.Date(started_at), hour_of_day) %>%
@@ -422,6 +490,10 @@ ggplot(hourly_trip_df, aes(y = hour_of_day, x = hourly_trip_count)) +
   theme(panel.grid.minor.y=element_blank(), panel.grid.major.y=element_blank()) +
 ggtitle("Hourly Trip Count")
 ```
+
+Most of the trips occur in the afternoon and early evening. The hour between 5pm - 6pm has the highest average count.
+
+This is the hourly breakdown for member group.
 
 ```{r}
 hourly_trip_df <- bikeshare_df %>%
@@ -438,6 +510,8 @@ ggplot(hourly_trip_df, aes(y = hour_of_day, x = hourly_trip_count)) +
   ggtitle("Hourly Member Trip Count")
 ```
 
+Now, we look at the chart for casual riders and compare the two groups.
+
 ```{r}
 hourly_trip_df <- bikeshare_df %>%
   filter(member_casual == "casual") %>% 
@@ -452,6 +526,10 @@ ggplot(hourly_trip_df, aes(y = hour_of_day, x = hourly_trip_count)) +
   theme(panel.grid.minor.y=element_blank(), panel.grid.major.y=element_blank()) +
   ggtitle("Hourly Casual Trip Count")
 ```
+
+Although, the two charts look relatively similar, there are subtle differences. There are more casual riders than members who ride the bike  late evenings and more member riders than casual riders who bike during the morning commute.
+
+Here is a look at the histogram of the duration of trips by the two groups.
 
 ```{r}
 modified_bikeshare_df <- bikeshare_df %>% 
@@ -470,20 +548,27 @@ ggplot(modified_bikeshare_df, aes(x = as.numeric(as.duration(trip_duration), "mi
   ggtitle("Logarithmic Count of Trips by Trip Duration")
 ```
 
+This plot confirms that casual riders are more likely to take longer trips than members. 
+
+We are now going to create a plot of the average distance travelled by the two groups for each month during the one year period. For optimal viewing, please open the plot in a new full-screen window.
+
 ```{r}
 monthly_trip_df <- bikeshare_df %>%
+  filter(!is.na(trip_distance)) %>% 
   group_by(month_of_year, member_casual) %>%
-  summarize(grouped_average_duration = mean(as.numeric(as.duration(trip_duration), "minutes"), na.rm = TRUE), grouped_std_dev = sd(as.numeric(as.duration(trip_duration), "minutes"), na.rm = TRUE), .groups = "drop")
+  summarize(grouped_average_distance = mean(trip_distance, na.rm = TRUE), grouped_std_dev = sd(trip_distance, na.rm = TRUE), .groups = "drop")
 
-ggplot(monthly_trip_df, aes(x = month_of_year, y = grouped_average_duration, group = member_casual)) + 
-  geom_line(aes(x = month_of_year, y = grouped_average_duration, color = member_casual, linetype = member_casual)) +
-  geom_ribbon(aes(ymin = grouped_average_duration - grouped_std_dev, ymax = grouped_average_duration + grouped_std_dev, fill = member_casual), alpha = 0.2) +
+ggplot(monthly_trip_df, aes(x = month_of_year, y = grouped_average_distance, group = member_casual)) + 
+  geom_line(aes(x = month_of_year, y = grouped_average_distance, color = member_casual, linetype = member_casual)) +
+  geom_ribbon(aes(ymin = grouped_average_distance - grouped_std_dev, ymax = grouped_average_distance + grouped_std_dev, fill = member_casual), alpha = 0.2) +
   xlab(" ") +
-  ylab("Average Trip Duration (minutes)") +
+  ylab("Average Trip Distance (miles)") +
   scale_x_discrete(labels = c(paste(month.abb[c(4:12)], 2020), paste(month.abb[c(1:3)], 2021))) +
   guides(color = guide_legend(title = "Rider Type"), fill = guide_legend(title = "Rider Type"), linetype = guide_legend(title = "Rider Type")) +
-  ggtitle("Average Trip Duration by Month of Year")
+  ggtitle("Average Trip Distance by Month of Year")
 ```
+
+On average, member riders travel farther between April and August last year than casual riders.
 
 ```{r}
 start_station_df <- bikeshare_df %>% 
@@ -494,6 +579,8 @@ start_station_df <- bikeshare_df %>%
   
 start_station_df
 ```
+
+Let's build a map of where all the bike stations are located.
 
 ```{r}
 basemap <- ggmap(get_stamenmap(c(left = min(start_station_df$start_lng) - .05,
@@ -506,6 +593,8 @@ basemap +
   geom_point(aes(x = start_lng, y = start_lat), data = start_station_df, color = "navy", size = 0.5) +
   theme_nothing()
 ```
+
+Here is a map of the 50 top bike stations where member and casual riders start the trip. For optimal viewing, please open the map in a new full-screen window.
 
 ```{r}
 top_start_df <- start_station_df %>% 
@@ -526,6 +615,10 @@ basemap +
   theme(axis.text = element_blank(), axis.ticks = element_blank(), axis.title = element_blank())
 ```
 
+The bike stations are generally in the same area, downtown Chicago and neighborhoods like Lincoln Park and Lakeview on the Northside that are next to Lake Michigan. Notice the size of the circles for casual riders are generally smaller than member for bike stations on the Northside. This indicates that more member riders start the trip at these bike stations than casual riders.
+
+Here is a graph of the names of the top 50 bike stations where members start the trip. For optimal viewing, please open the plot in a new full-screen window.
+
 ```{r}
 member_start_df <- start_station_df %>% filter(member_casual == "member") %>% 
   slice_max(trip_count, n = 50)
@@ -543,6 +636,8 @@ ggplot(member_start_df, aes(x = as.factor(reorder(start_station_name, trip_count
   coord_polar() +
   geom_text(data = label_meta, aes(x = start_station_name, y = trip_count, label = paste(start_station_name, trip_count, sep = ": "), hjust = hjust), color = "black", fontface = "bold", alpha = 0.6, size = 2.5, angle = -label_meta$angle, inherit.aes = FALSE) 
 ```
+
+Now, this is a graph of the names of the top 50 bike stations where casual riders start the trip. For optimal viewing, please open the plot in a new full-screen window.
 
 ```{r}
 casual_start_df <- start_station_df %>% filter(member_casual == "casual") %>% 
@@ -564,6 +659,8 @@ ggplot(casual_start_df, aes(x = as.factor(reorder(start_station_name, trip_count
   geom_text(data = label_meta, aes(x = start_station_name, y = trip_count, label = paste(start_station_name, trip_count, sep = ": "), hjust = hjust), color = "black", fontface = "bold", alpha = 0.6, size = 2.5, angle = -label_meta$angle, inherit.aes = FALSE)
 ```
 
+The top member starting station, Clark St. & Elm St. is in the 8th place on the top casual starting station. The top casual starting station, Streeter Dr. & Grand Ave. is 50th on the top member starting station. The number of trips starting at the stations falls off quicker for casual riders than members.
+
 ```{r}
 end_station_df <- bikeshare_df %>% 
   filter(end_station_name != "") %>% 
@@ -573,6 +670,8 @@ end_station_df <- bikeshare_df %>%
 
 end_station_df
 ```
+
+Now, let's examine the 50 top stations that member and casual riders end the bike trip. For optimal viewing, please open the map in a new full-screen window.
 
 ```{r}
 top_end_df <- end_station_df %>% 
@@ -592,6 +691,10 @@ basemap +
   guides(size = "none", color = guide_legend(title="Rider Type")) +
   theme(axis.text = element_blank(), axis.ticks = element_blank(), axis.title = element_blank())
 ```
+
+The map looks very similar to that of starting bike stations.
+
+We are going to create a plot comparing the top 50 ending member bike stations to the top 50 ending casual bike stations. For optimal viewing, please open the plot in a new full-screen window.
 
 ```{r}
 member_end_df <- end_station_df %>% filter(member_casual == "member") %>% 
@@ -622,6 +725,10 @@ ggplot(end_station_df, aes(x = as.factor(id), y = trip_count, fill = member_casu
   geom_text(data = label_meta, aes(x = id, y = trip_count, label = paste(end_station_name, trip_count, sep = ": "), hjust = hjust), color = "black", fontface = "bold", alpha = 0.6, size = 2.5, angle = label_meta$angle, inherit.aes = FALSE) 
 ```
 
+Similar observations of the top 50 starting station names are seen here.
+
+It's time to create something exciting, an animated plot of the ten bike routes for the different hours of the day for the two groups. We are leaving out bike routes that start and end at the same station name. For optimal viewing, please open the map in a new full-screen window.
+
 ```{r}
 route_df <- bikeshare_df %>%
   filter(start_station_name != "" & end_station_name != "" & start_station_name != end_station_name) %>% 
@@ -635,6 +742,8 @@ route_df <- bikeshare_df %>%
 
 route_df
 ```
+
+For optimal viewing, please open the map in a new full-screen window.
 
 ```{r}
 basemap <- ggmap(get_stamenmap(
@@ -663,6 +772,10 @@ animate(route_time_lapse, duration = 45, height = 800, width = 600)
 anim_save("route_time_lapse.gif")
 ```
 
+The top 10 most frequent routes for casual riders between 10am - 8pm are in downtown Chicago and along North Lake Shore Drive.
+
+Let's create a new table of the top 20 station_name with the highest combined total count of trips starting and ending at that location.
+
 ```{r}
 start_station_df <- bikeshare_df %>%
   filter(start_station_name != "" & end_station_name != "") %>%
@@ -683,6 +796,8 @@ station_df <- start_station_df %>%
   
 station_df
 ```
+
+This time, we are building an interactive chord diagram of the top 20 station_name for the member group that defines the route between pairs of station_name as a relationship or an edge of a graph. We are going to examine these connections to look for patterns. For optimal viewing, please open the plot in a new full-screen window.
 
 ```{r}
 stations <- station_df$station_name
@@ -710,6 +825,12 @@ dimnames(chord_matrix) <- list(depart = stations, arrive = stations)
 chorddiag(chord_matrix, groupColors = colors_swatches, groupnameFontsize = 10, groupnamePadding = 5, showTicks = FALSE)
 ```
 
+Let me quickly walk you through a few concepts of a chord diagram. Simply click or hover on the station_name you would like to examine and all the routes containing the station_name will be highlighted. The thickness of the ribbon represents the combined bidirectional count of trips between two station_name and the color of the ribbon represents the color of the station_name with the larger count of trips ending there. If you hover on a ribbon, an infobox will pop up showing the total trip count for both directions.
+
+Take a few minutes to study the chord diagram above.
+
+Next, we are going to create a chord diagram of the top 20 station_names for casual riders and compare the diagrams for insights. For optimal viewing, please open the plot in a new full-screen window.
+
 ```{r}
 casual_adjacency <- bikeshare_df %>% 
   filter(member_casual == "casual" & start_station_name %in% stations & end_station_name %in% stations) %>% 
@@ -734,6 +855,8 @@ dimnames(chord_matrix) <- list(depart = stations, arrive = stations)
 chorddiag(chord_matrix, groupColors = colors_swatches, groupnameFontsize = 10, groupnamePadding = 5, showTicks = FALSE)
 ```
 
+By comparing the two chord diagrams, we notice that there are a few large ribbon `humps` in the diagram representing casual riders. This indicates that there are a large number of riders who started and ended the trip at the same station. We also can clearly see that the thickest ribbon between two different station_name can be found on the casual rider chord diagram between Streeter Dr. & Grand Ave. and Lake Shore Dr. & Monroe St.
+
 ```{r}
 freq_routes_df <- bikeshare_df %>%
   filter(start_station_name != "" & end_station_name != "" & start_station_name != end_station_name) %>%
@@ -745,6 +868,7 @@ freq_routes_df <- bikeshare_df %>%
   slice_max(na.omit(route_count), n = 10) %>% 
   ungroup()
 
+# create new rows where subgroup_route_count == 0
 temp_df <- freq_routes_df %>% filter(subgroup_route_count == route_count)
 
 temp_df$subgroup_route_count <- 0L
@@ -753,6 +877,8 @@ freq_routes_df <- bind_rows(freq_routes_df, temp_df) %>% arrange(month_of_year, 
 
 freq_routes_df
 ```
+
+Finally, let's create a chart of the top bidirectional routes excluding trips starting and ending at the same station_name for each month of the one year period.
 
 ```{r}
 month_mapper <- c(paste(month.abb[c(4:12)], 2020), paste(month.abb[c(1:3)], 2021))
@@ -767,3 +893,4 @@ ggplot(freq_routes_df, aes(y = route_name, x = subgroup_route_count, fill = memb
   labs(title = "Most Frequent Monthly Bike Routes (Bidirectional)")
 ```
 
+The most frequent monthly routes are highest in July and August 2020 for casual riders.
